@@ -3,7 +3,6 @@ import type {
   PlayerId,
   Team,
   Match,
-  MatchResult,
   Round,
   HistoryMap,
   PlayerHistory,
@@ -13,6 +12,18 @@ import type {
 } from './types';
 
 // ==================== 工具函数 ====================
+
+const REPEAT_TEAMMATE_PENALTY = 100000;
+const TEAM_SCORE_DIFF_WEIGHT = 2000;
+const TEAM_SEED_DIFF_WEIGHT = 20;
+const PERSONAL_SCORE_SPREAD_WEIGHT = 80;
+const HIGH_LOW_TEAMMATE_WEIGHT = 10;
+const REPEAT_OPPONENT_WEIGHT = 8;
+const COLOR_REPEAT_WEIGHT = 5;
+const RANDOM_NOISE_WEIGHT = 0.01;
+const EXACT_SEARCH_PLAYER_LIMIT = 16;
+const CANDIDATE_LIMIT = 80;
+const NODE_LIMIT = 200000;
 
 function uid(prefix = ''): string {
   return prefix + Math.random().toString(36).slice(2, 9) + Date.now().toString(36).slice(-4);
@@ -60,31 +71,95 @@ export function buildHistory(rounds: Round[]): HistoryMap {
 
 // ==================== 评分函数 ====================
 
-/** 队友匹配优先级分数（越低越好） */
-function teammateScore(p1: Player, p2: Player, history: HistoryMap): number {
+function seededNoise(seed: string): number {
+  let hash = 2166136261;
+  for (let i = 0; i < seed.length; i++) {
+    hash ^= seed.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return ((hash >>> 0) % 1000000) / 1000000;
+}
+
+/** 队友匹配成本（越低越好） */
+function teammateCost(p1: Player, p2: Player, history: HistoryMap): number {
   const h1 = history.get(p1.id) ?? emptyHistory();
   const h2 = history.get(p2.id) ?? emptyHistory();
 
-  // 是否合作过（最重惩罚）
   const hasTeamed = h1.teammates.has(p2.id) || h2.teammates.has(p1.id);
-  const teamedPenalty = hasTeamed ? 10000 : 0;
+  const teamedPenalty = hasTeamed ? REPEAT_TEAMMATE_PENALTY : 0;
 
-  // 种子差距：差距越大越好，差距小则分数高（不好）
+  // 种子差距越大越好：高种子优先搭低种子。
   const seedDiff = Math.abs(p1.seed - p2.seed);
-  const seedScore = (64 - seedDiff) * 10; // 最大差距63时分数最低（最好）
+  const seedScore = (64 - seedDiff) * HIGH_LOW_TEAMMATE_WEIGHT;
 
-  // 少量随机性，避免固定模式
-  const randomNoise = Math.random() * 20;
-
-  return teamedPenalty + seedScore + randomNoise;
+  return teamedPenalty + seedScore;
 }
 
-/** 队伍对阵优先级分数（越低越好） */
-function matchScore(teamA: Team, teamB: Team, playersMap: Map<PlayerId, Player>): number {
-  const seedA = teamA.members.reduce((sum, m) => sum + (playersMap.get(m.playerId)?.seed ?? 0), 0);
-  const seedB = teamB.members.reduce((sum, m) => sum + (playersMap.get(m.playerId)?.seed ?? 0), 0);
-  return Math.abs(seedA - seedB);
+function colorCostForTeam(p1: Player, p2: Player, history: HistoryMap): number {
+  const h1 = history.get(p1.id);
+  const h2 = history.get(p2.id);
+  const whiteFirst =
+    (h1?.lastColor === 'white' ? COLOR_REPEAT_WEIGHT : 0) +
+    (h2?.lastColor === 'black' ? COLOR_REPEAT_WEIGHT : 0);
+  const whiteSecond =
+    (h2?.lastColor === 'white' ? COLOR_REPEAT_WEIGHT : 0) +
+    (h1?.lastColor === 'black' ? COLOR_REPEAT_WEIGHT : 0);
+  return Math.min(whiteFirst, whiteSecond);
 }
+
+/** 队伍对阵成本（越低越好） */
+function matchCost(
+  teamA: Team,
+  teamB: Team,
+  playersMap: Map<PlayerId, Player>,
+  history: HistoryMap
+): number {
+  const statsA = teamStats(teamA, playersMap);
+  const statsB = teamStats(teamB, playersMap);
+
+  const scoreDiff = Math.abs(statsA.scoreSum - statsB.scoreSum);
+  const seedDiff = Math.abs(statsA.seedSum - statsB.seedSum);
+  const scoreSpread = Math.max(...statsA.scores, ...statsB.scores) - Math.min(...statsA.scores, ...statsB.scores);
+  const repeatedOpponents = countRepeatedOpponents(teamA, teamB, history);
+
+  return (
+    scoreDiff * TEAM_SCORE_DIFF_WEIGHT +
+    seedDiff * TEAM_SEED_DIFF_WEIGHT +
+    scoreSpread * PERSONAL_SCORE_SPREAD_WEIGHT +
+    repeatedOpponents * REPEAT_OPPONENT_WEIGHT
+  );
+}
+
+function teamStats(team: Team, playersMap: Map<PlayerId, Player>): { scoreSum: number; seedSum: number; scores: number[] } {
+  return team.members.reduce(
+    (stats, m) => {
+      const player = playersMap.get(m.playerId);
+      return {
+        scoreSum: stats.scoreSum + (player?.score ?? 0),
+        seedSum: stats.seedSum + (player?.seed ?? 0),
+        scores: [...stats.scores, player?.score ?? 0],
+      };
+    },
+    { scoreSum: 0, seedSum: 0, scores: [] as number[] }
+  );
+}
+
+function countRepeatedOpponents(teamA: Team, teamB: Team, history: HistoryMap): number {
+  let count = 0;
+  for (const a of teamA.members) {
+    const hA = history.get(a.playerId);
+    for (const b of teamB.members) {
+      if (hA?.opponents.has(b.playerId)) count++;
+    }
+  }
+  return count;
+}
+
+type MatchCandidate = {
+  match: Match;
+  cost: number;
+  playerIds: PlayerId[];
+};
 
 // ==================== 核心配对算法 ====================
 
@@ -110,77 +185,140 @@ export function generateSemiAutoPairing(input: PairingInput): PairingOutput {
   });
 
   const playersMap = new Map<PlayerId, Player>(players.map((p) => [p.id, p]));
-  const unassigned = new Set<PlayerId>(sortedPlayers.map((p) => p.id));
-  const teams: Team[] = [];
+  const playableCount = Math.floor(sortedPlayers.length / 4) * 4;
+  const activePlayers = sortedPlayers.slice(0, playableCount);
+  const leftoverPlayers = sortedPlayers.slice(playableCount);
 
-  // ---- 第一步：组成 2 人队伍 ----
-  while (unassigned.size >= 2) {
-    // 取当前 score 最高的未分配玩家
-    const candidates = sortedPlayers.filter((p) => unassigned.has(p.id));
-    if (candidates.length < 2) break;
-
-    const leader = candidates[0];
-    unassigned.delete(leader.id);
-
-    // 为 leader 找最佳队友
-    let bestMate: Player | null = null;
-    let bestScore = Infinity;
-
-    for (const mate of candidates.slice(1)) {
-      if (!unassigned.has(mate.id)) continue;
-      const score = teammateScore(leader, mate, history);
-      if (score < bestScore) {
-        bestScore = score;
-        bestMate = mate;
-      }
-    }
-
-    if (bestMate) {
-      unassigned.delete(bestMate.id);
-      teams.push(createTeam(leader, bestMate, history));
-    } else {
-      warnings.push(`玩家 ${leader.name} 无法找到队友`);
-    }
+  if (leftoverPlayers.length > 0) {
+    warnings.push(`以下玩家本轮轮空：${leftoverPlayers.map((p) => p.name).join('、')}`);
   }
 
-  // 剩余无法组队的人
-  if (unassigned.size > 0) {
-    const leftover = Array.from(unassigned).map((id) => playersMap.get(id)!.name);
-    warnings.push(`以下玩家本轮轮空：${leftover.join('、')}`);
+  const search = searchBestMatches(activePlayers, playersMap, history, roundNumber);
+  if (!search.exact) {
+    warnings.push('参赛人数较多，本轮使用候选集全局优化；如需严格全量最优，请减少人数或接入求解器');
+  }
+  if (search.hitNodeLimit) {
+    warnings.push('全局搜索达到节点上限，已返回当前找到的最低成本方案');
   }
 
-  // ---- 第二步：将队伍配成 Match ----
-  const unpairedTeams = [...teams];
-  const matches: Match[] = [];
-
-  while (unpairedTeams.length >= 2) {
-    const leaderTeam = unpairedTeams.shift()!;
-
-    let bestOpponentIdx = -1;
-    let bestScore = Infinity;
-
-    for (let i = 0; i < unpairedTeams.length; i++) {
-      const score = matchScore(leaderTeam, unpairedTeams[i], playersMap);
-      if (score < bestScore) {
-        bestScore = score;
-        bestOpponentIdx = i;
-      }
-    }
-
-    if (bestOpponentIdx >= 0) {
-      const opponent = unpairedTeams.splice(bestOpponentIdx, 1)[0];
-      matches.push(createMatch(leaderTeam, opponent));
-    } else {
-      warnings.push(`队伍 ${teamName(leaderTeam, playersMap)} 无法找到对手`);
-    }
-  }
-
-  if (unpairedTeams.length > 0) {
-    const t = unpairedTeams[0];
-    warnings.push(`队伍 ${teamName(t, playersMap)} 无法配对对手`);
-  }
+  const matches = search.matches.map((match, index) => ({
+    ...match,
+    id: `${input.roundNumber}-match-${index + 1}-${match.teamA.id}-${match.teamB.id}`,
+  }));
 
   return { matches, warnings };
+}
+
+function searchBestMatches(
+  players: Player[],
+  playersMap: Map<PlayerId, Player>,
+  history: HistoryMap,
+  roundNumber: number
+): { matches: Match[]; exact: boolean; hitNodeLimit: boolean } {
+  const exact = players.length <= EXACT_SEARCH_PLAYER_LIMIT;
+  const candidateLimit = exact ? Infinity : CANDIDATE_LIMIT;
+  let bestCost = Infinity;
+  let bestMatches: Match[] = [];
+  let nodes = 0;
+  let hitNodeLimit = false;
+
+  function dfs(remaining: Player[], matches: Match[], cost: number) {
+    if (nodes++ > NODE_LIMIT) {
+      hitNodeLimit = true;
+      return;
+    }
+    if (cost >= bestCost) return;
+    if (remaining.length === 0) {
+      bestCost = cost;
+      bestMatches = matches;
+      return;
+    }
+
+    const candidates = generateMatchCandidates(
+      remaining,
+      playersMap,
+      history,
+      roundNumber,
+      candidateLimit
+    );
+
+    for (const candidate of candidates) {
+      const used = new Set(candidate.playerIds);
+      dfs(
+        remaining.filter((p) => !used.has(p.id)),
+        [...matches, candidate.match],
+        cost + candidate.cost
+      );
+      if (hitNodeLimit) break;
+    }
+  }
+
+  dfs(players, [], 0);
+
+  return { matches: bestMatches, exact: exact && !hitNodeLimit, hitNodeLimit };
+}
+
+function generateMatchCandidates(
+  remaining: Player[],
+  playersMap: Map<PlayerId, Player>,
+  history: HistoryMap,
+  roundNumber: number,
+  limit: number
+): MatchCandidate[] {
+  if (remaining.length < 4) return [];
+
+  const leader = remaining[0];
+  const candidates: MatchCandidate[] = [];
+
+  for (let i = 1; i < remaining.length - 2; i++) {
+    for (let j = i + 1; j < remaining.length - 1; j++) {
+      for (let k = j + 1; k < remaining.length; k++) {
+        const group: [Player, Player, Player, Player] = [
+          leader,
+          remaining[i],
+          remaining[j],
+          remaining[k],
+        ];
+        candidates.push(...arrangeGroup(group, playersMap, history, roundNumber));
+      }
+    }
+  }
+
+  candidates.sort((a, b) => a.cost - b.cost);
+  return Number.isFinite(limit) ? candidates.slice(0, limit) : candidates;
+}
+
+function arrangeGroup(
+  group: [Player, Player, Player, Player],
+  playersMap: Map<PlayerId, Player>,
+  history: HistoryMap,
+  roundNumber: number
+): MatchCandidate[] {
+  const splits: [[Player, Player], [Player, Player]][] = [
+    [[group[0], group[1]], [group[2], group[3]]],
+    [[group[0], group[2]], [group[1], group[3]]],
+    [[group[0], group[3]], [group[1], group[2]]],
+  ];
+
+  return splits.map(([pairA, pairB]) => {
+    const teamA = createTeam(pairA[0], pairA[1], history);
+    const teamB = createTeam(pairB[0], pairB[1], history);
+    const playerIds = group.map((p) => p.id);
+    const noise = seededNoise(`${roundNumber}:${playerIds.slice().sort().join(':')}:${teamA.id}:${teamB.id}`);
+    const cost =
+      teammateCost(pairA[0], pairA[1], history) +
+      teammateCost(pairB[0], pairB[1], history) +
+      colorCostForTeam(pairA[0], pairA[1], history) +
+      colorCostForTeam(pairB[0], pairB[1], history) +
+      matchCost(teamA, teamB, playersMap, history) +
+      noise * RANDOM_NOISE_WEIGHT;
+
+    return {
+      match: createMatch(teamA, teamB),
+      cost,
+      playerIds,
+    };
+  });
 }
 
 /**
@@ -225,7 +363,7 @@ function createTeam(p1: Player, p2: Player, history: HistoryMap): Team {
   }
 
   return {
-    id: uid('team-'),
+    id: `team-${white.id}-${black.id}`,
     members: [
       { playerId: white.id, color: 'white' },
       { playerId: black.id, color: 'black' },
@@ -239,10 +377,6 @@ function createMatch(teamA: Team, teamB: Team): Match {
     teamA,
     teamB,
   };
-}
-
-function teamName(team: Team, playersMap: Map<PlayerId, Player>): string {
-  return team.members.map((m) => playersMap.get(m.playerId)?.name ?? '?').join(' + ');
 }
 
 // ==================== 对外统一入口 ====================
@@ -348,8 +482,21 @@ export function calculateScores(players: Player[], rounds: Round[]): Player[] {
 export function validateRound(round: Round, allPlayerIds: Set<PlayerId>): string[] {
   const errors: string[] = [];
   const seen = new Set<PlayerId>();
+  const validScores = new Set([0, 0.5, 1]);
 
   for (const match of round.matches) {
+    if (!match.result) {
+      errors.push(`对局 ${match.id} 尚未录入结果`);
+    } else {
+      const { teamAScore, teamBScore } = match.result;
+      if (!validScores.has(teamAScore) || !validScores.has(teamBScore)) {
+        errors.push(`对局 ${match.id} 结果分值无效`);
+      }
+      if (teamAScore + teamBScore !== 1) {
+        errors.push(`对局 ${match.id} 双方得分合计必须为1`);
+      }
+    }
+
     for (const team of [match.teamA, match.teamB]) {
       if (team.members.length !== 2) {
         errors.push(`队伍 ${team.id} 成员数不是2`);
