@@ -3,6 +3,7 @@ import type {
   PlayerId,
   Team,
   Match,
+  Board,
   Round,
   HistoryMap,
   PlayerHistory,
@@ -14,11 +15,11 @@ import type {
 // ==================== 工具函数 ====================
 
 const REPEAT_TEAMMATE_PENALTY = 100000;
+const REPEAT_OPPONENT_WEIGHT = 20000;
 const TEAM_SCORE_DIFF_WEIGHT = 2000;
 const TEAM_SEED_DIFF_WEIGHT = 20;
 const PERSONAL_SCORE_SPREAD_WEIGHT = 80;
 const HIGH_LOW_TEAMMATE_WEIGHT = 10;
-const REPEAT_OPPONENT_WEIGHT = 8;
 const COLOR_REPEAT_WEIGHT = 5;
 const RANDOM_NOISE_WEIGHT = 0.01;
 const EXACT_SEARCH_PLAYER_LIMIT = 16;
@@ -41,6 +42,7 @@ export function buildHistory(rounds: Round[]): HistoryMap {
       const { teamA, teamB } = match;
       // 记录队友关系与颜色历史
       for (const team of [teamA, teamB]) {
+        if (team.members.length !== 2) continue;
         const [m1, m2] = team.members;
         const h1 = map.get(m1.playerId) ?? emptyHistory();
         const h2 = map.get(m2.playerId) ?? emptyHistory();
@@ -52,16 +54,15 @@ export function buildHistory(rounds: Round[]): HistoryMap {
         map.set(m1.playerId, h1);
         map.set(m2.playerId, h2);
       }
-      // 记录对手关系（个人层面）
-      for (const mA of teamA.members) {
-        for (const mB of teamB.members) {
-          const hA = map.get(mA.playerId) ?? emptyHistory();
-          const hB = map.get(mB.playerId) ?? emptyHistory();
-          hA.opponents.add(mB.playerId);
-          hB.opponents.add(mA.playerId);
-          map.set(mA.playerId, hA);
-          map.set(mB.playerId, hB);
-        }
+      // 记录真实台面对手关系。旧数据没有 boards 时按交叉颜色推导。
+      for (const board of getMatchBoards(match)) {
+        if (!board.whitePlayerId || !board.blackPlayerId) continue;
+        const hWhite = map.get(board.whitePlayerId) ?? emptyHistory();
+        const hBlack = map.get(board.blackPlayerId) ?? emptyHistory();
+        hWhite.opponents.add(board.blackPlayerId);
+        hBlack.opponents.add(board.whitePlayerId);
+        map.set(board.whitePlayerId, hWhite);
+        map.set(board.blackPlayerId, hBlack);
       }
     }
   }
@@ -145,14 +146,41 @@ function teamStats(team: Team, playersMap: Map<PlayerId, Player>): { scoreSum: n
 }
 
 function countRepeatedOpponents(teamA: Team, teamB: Team, history: HistoryMap): number {
-  let count = 0;
-  for (const a of teamA.members) {
-    const hA = history.get(a.playerId);
-    for (const b of teamB.members) {
-      if (hA?.opponents.has(b.playerId)) count++;
-    }
-  }
-  return count;
+  return getBoardsForTeams(teamA, teamB).filter((board) =>
+    history.get(board.whitePlayerId)?.opponents.has(board.blackPlayerId)
+  ).length;
+}
+
+export function getBoardsForTeams(teamA: Team, teamB: Team): [Board, Board] {
+  const aWhite = teamA.members.find((m) => m.color === 'white') ?? teamA.members[0];
+  const aBlack = teamA.members.find((m) => m.color === 'black') ?? teamA.members[1];
+  const bWhite = teamB.members.find((m) => m.color === 'white') ?? teamB.members[0];
+  const bBlack = teamB.members.find((m) => m.color === 'black') ?? teamB.members[1];
+
+  return [
+    {
+      boardNumber: 0,
+      whitePlayerId: aWhite?.playerId ?? '',
+      blackPlayerId: bBlack?.playerId ?? '',
+    },
+    {
+      boardNumber: 0,
+      whitePlayerId: bWhite?.playerId ?? '',
+      blackPlayerId: aBlack?.playerId ?? '',
+    },
+  ];
+}
+
+export function getMatchBoards(match: Match): [Board, Board] {
+  return match.boards ?? getBoardsForTeams(match.teamA, match.teamB);
+}
+
+function numberBoards(match: Match, firstBoardNumber: number): [Board, Board] {
+  const boards = getMatchBoards(match);
+  return [
+    { ...boards[0], boardNumber: firstBoardNumber },
+    { ...boards[1], boardNumber: firstBoardNumber + 1 },
+  ];
 }
 
 type MatchCandidate = {
@@ -204,6 +232,7 @@ export function generateSemiAutoPairing(input: PairingInput): PairingOutput {
   const matches = search.matches.map((match, index) => ({
     ...match,
     id: `${input.roundNumber}-match-${index + 1}-${match.teamA.id}-${match.teamB.id}`,
+    boards: numberBoards(match, index * 2 + 1),
   }));
 
   return { matches, warnings };
@@ -376,6 +405,7 @@ function createMatch(teamA: Team, teamB: Team): Match {
     id: uid('match-'),
     teamA,
     teamB,
+    boards: getBoardsForTeams(teamA, teamB),
   };
 }
 
@@ -430,12 +460,19 @@ export function calculateScores(players: Player[], rounds: Round[]): Player[] {
         scoreMap.set(id, (scoreMap.get(id) ?? 0) + teamBScore);
       }
 
-      // 记录对手关系（用于 Buchholz 和 SB）
-      for (const aId of aIds) {
-        for (const bId of bIds) {
-          opponentsMap.get(aId)!.push({ opponentId: bId, roundScore: teamAScore });
-          opponentsMap.get(bId)!.push({ opponentId: aId, roundScore: teamBScore });
-        }
+      // 记录真实台面对手关系（用于 Buchholz 和 SB）
+      for (const board of getMatchBoards(match)) {
+        const whiteInA = aIds.includes(board.whitePlayerId);
+        const whiteScore = whiteInA ? teamAScore : teamBScore;
+        const blackScore = whiteInA ? teamBScore : teamAScore;
+        opponentsMap.get(board.whitePlayerId)!.push({
+          opponentId: board.blackPlayerId,
+          roundScore: whiteScore,
+        });
+        opponentsMap.get(board.blackPlayerId)!.push({
+          opponentId: board.whitePlayerId,
+          roundScore: blackScore,
+        });
       }
     }
 
@@ -509,6 +546,28 @@ export function validateRound(round: Round, allPlayerIds: Set<PlayerId>): string
         if (!allPlayerIds.has(m.playerId)) {
           errors.push(`未知玩家 ${m.playerId}`);
         }
+      }
+    }
+
+    const teamAIds = new Set(match.teamA.members.map((m) => m.playerId));
+    const teamBIds = new Set(match.teamB.members.map((m) => m.playerId));
+    const boards = getMatchBoards(match);
+    for (const board of boards) {
+      if (!board.boardNumber || board.boardNumber < 1) {
+        errors.push(`台次编号无效`);
+      }
+      if (!allPlayerIds.has(board.whitePlayerId) || !allPlayerIds.has(board.blackPlayerId)) {
+        errors.push(`台次 ${board.boardNumber} 包含未知玩家`);
+      }
+      if (board.whitePlayerId === board.blackPlayerId) {
+        errors.push(`台次 ${board.boardNumber} 黑白双方不能是同一玩家`);
+      }
+      const whiteInA = teamAIds.has(board.whitePlayerId);
+      const whiteInB = teamBIds.has(board.whitePlayerId);
+      const blackInA = teamAIds.has(board.blackPlayerId);
+      const blackInB = teamBIds.has(board.blackPlayerId);
+      if (!((whiteInA && blackInB) || (whiteInB && blackInA))) {
+        errors.push(`台次 ${board.boardNumber} 必须由A队与B队各一名选手组成`);
       }
     }
   }

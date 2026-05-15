@@ -1,8 +1,7 @@
 <script setup lang="ts">
-import { ref, computed, watch, nextTick } from 'vue';
+import { ref, computed } from 'vue';
 import { useTournamentStore } from '../stores/tournament';
-import type { PlayerId, PairingStrategy, Color } from '../domain/types';
-import Sortable from 'sortablejs';
+import type { Board, Match, PlayerId, PairingStrategy } from '../domain/types';
 
 const emit = defineEmits<{ (e: 'go-scores'): void }>();
 const store = useTournamentStore();
@@ -62,6 +61,21 @@ function getPlayerSeed(id: PlayerId) {
 
 function teamSeedSum(team: { members: { playerId: PlayerId }[] }) {
   return team.members.reduce((sum, m) => sum + getPlayerSeed(m.playerId), 0);
+}
+
+function getBoards(match: Match): [Board, Board] | [] {
+  if (match.boards) return match.boards;
+  if (match.teamA.members.length !== 2 || match.teamB.members.length !== 2) return [];
+
+  const aWhite = match.teamA.members.find((m) => m.color === 'white') ?? match.teamA.members[0];
+  const aBlack = match.teamA.members.find((m) => m.color === 'black') ?? match.teamA.members[1];
+  const bWhite = match.teamB.members.find((m) => m.color === 'white') ?? match.teamB.members[0];
+  const bBlack = match.teamB.members.find((m) => m.color === 'black') ?? match.teamB.members[1];
+
+  return [
+    { boardNumber: 0, whitePlayerId: aWhite.playerId, blackPlayerId: bBlack.playerId },
+    { boardNumber: 0, whitePlayerId: bWhite.playerId, blackPlayerId: aBlack.playerId },
+  ];
 }
 
 const unassignedPlayers = computed(() => {
@@ -215,8 +229,32 @@ const warnings = computed(() => store.warnings);
             </div>
           </div>
 
-          <!-- VS -->
-          <div class="vs">VS</div>
+          <!-- Boards -->
+          <div class="boards">
+            <div
+              v-for="(board, boardIdx) in getBoards(match)"
+              :key="`${match.id}-${boardIdx}`"
+              class="board-line"
+            >
+              <div class="board-title">
+                第 {{ board.boardNumber || boardIdx + 1 }} 台
+              </div>
+              <div class="board-players">
+                <span class="board-player">
+                  <span class="color-dot white"></span>
+                  {{ getPlayerName(board.whitePlayerId) }}
+                </span>
+                <span class="board-vs">vs</span>
+                <span class="board-player">
+                  <span class="color-dot black"></span>
+                  {{ getPlayerName(board.blackPlayerId) }}
+                </span>
+              </div>
+            </div>
+            <div v-if="getBoards(match).length === 0" class="boards-placeholder">
+              队伍满员后生成台次
+            </div>
+          </div>
 
           <!-- Team B -->
           <div
@@ -256,7 +294,7 @@ const warnings = computed(() => store.warnings);
             <div v-if="match.result" class="result-display">
               {{ match.result.teamAScore }} : {{ match.result.teamBScore }}
             </div>
-            <div v-else-if="!currentRoundLocked" class="result-input">
+            <div v-else-if="!store.currentRoundLocked" class="result-input">
               <button @click="store.setMatchResult(match.id, { teamAScore: 1, teamBScore: 0 })">A胜</button>
               <button @click="store.setMatchResult(match.id, { teamAScore: 0, teamBScore: 1 })">B胜</button>
               <button @click="store.setMatchResult(match.id, { teamAScore: 0.5, teamBScore: 0.5 })">平局</button>
@@ -444,7 +482,7 @@ const warnings = computed(() => store.warnings);
 
 .match-row {
   display: grid;
-  grid-template-columns: 1fr auto 1fr auto;
+  grid-template-columns: 1fr minmax(220px, 1.2fr) 1fr auto;
   gap: 12px;
   align-items: start;
   background: white;
@@ -523,19 +561,67 @@ const warnings = computed(() => store.warnings);
   line-height: 1;
 }
 
-.vs {
-  font-weight: 700;
-  color: #636e72;
-  align-self: center;
-  font-size: 12px;
-}
-
 .result {
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 6px;
   min-width: 80px;
+}
+
+.boards {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.board-line {
+  border: 1px solid #dfe6e9;
+  border-radius: 6px;
+  padding: 8px;
+  background: #f8f9fa;
+}
+
+.board-title {
+  font-size: 11px;
+  font-weight: 700;
+  color: #636e72;
+  margin-bottom: 6px;
+}
+
+.board-players {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.board-player {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.board-player:last-child {
+  justify-content: flex-end;
+}
+
+.board-vs {
+  color: #636e72;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.boards-placeholder {
+  padding: 16px 8px;
+  text-align: center;
+  color: #b2bec3;
+  font-size: 12px;
+  border: 1px dashed #dfe6e9;
+  border-radius: 6px;
 }
 
 .result-display {

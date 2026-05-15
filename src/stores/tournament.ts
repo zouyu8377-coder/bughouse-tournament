@@ -4,10 +4,8 @@ import type {
   Tournament,
   Player,
   Round,
-  Match,
   MatchResult,
   PlayerId,
-  Team,
   PairingStrategy,
 } from '../domain/types';
 import {
@@ -15,6 +13,7 @@ import {
   buildHistory,
   calculateScores,
   validateRound,
+  getBoardsForTeams,
 } from '../domain/pairingEngine';
 import {
   saveTournament,
@@ -172,6 +171,7 @@ export const useTournamentStore = defineStore('tournament', () => {
 
     tournament.value.rounds.push(newRound);
     tournament.value.currentRound = roundNumber;
+    rebuildCurrentRoundBoards();
     persist();
   }
 
@@ -219,12 +219,14 @@ export const useTournamentStore = defineStore('tournament', () => {
       teamA: { id: uid('team-'), members: [] as any },
       teamB: { id: uid('team-'), members: [] as any },
     });
+    rebuildCurrentRoundBoards();
     persist();
   }
 
   function removeMatch(matchId: string) {
     if (!currentRoundObj.value || currentRoundObj.value.locked) return;
     currentRoundObj.value.matches = currentRoundObj.value.matches.filter((m) => m.id !== matchId);
+    rebuildCurrentRoundBoards();
     persist();
   }
 
@@ -243,6 +245,7 @@ export const useTournamentStore = defineStore('tournament', () => {
     const color = team.members.length === 0 ? 'white' : 'black';
     team.members.push({ playerId, color });
 
+    rebuildCurrentRoundBoards();
     persist();
   }
 
@@ -252,6 +255,7 @@ export const useTournamentStore = defineStore('tournament', () => {
     if (!match) return;
     const team = teamSide === 'A' ? match.teamA : match.teamB;
     team.members = team.members.filter((m) => m.playerId !== playerId);
+    rebuildCurrentRoundBoards();
     persist();
   }
 
@@ -261,6 +265,7 @@ export const useTournamentStore = defineStore('tournament', () => {
       match.teamA.members = match.teamA.members.filter((m) => m.playerId !== playerId);
       match.teamB.members = match.teamB.members.filter((m) => m.playerId !== playerId);
     }
+    rebuildCurrentRoundBoards();
   }
 
   function swapPlayers(matchId: string, teamSide: 'A' | 'B', idx1: number, idx2: number) {
@@ -271,6 +276,7 @@ export const useTournamentStore = defineStore('tournament', () => {
     const tmp = team.members[idx1];
     team.members[idx1] = team.members[idx2];
     team.members[idx2] = tmp;
+    rebuildCurrentRoundBoards();
     persist();
   }
 
@@ -296,7 +302,23 @@ export const useTournamentStore = defineStore('tournament', () => {
     warnings.value = output.warnings;
     currentRoundObj.value.matches = output.matches;
     currentRoundObj.value.strategy = strategy;
+    rebuildCurrentRoundBoards();
     persist();
+  }
+
+  function rebuildCurrentRoundBoards() {
+    if (!currentRoundObj.value) return;
+    currentRoundObj.value.matches.forEach((match, index) => {
+      if (match.teamA.members.length === 2 && match.teamB.members.length === 2) {
+        const boards = getBoardsForTeams(match.teamA, match.teamB);
+        match.boards = [
+          { ...boards[0], boardNumber: index * 2 + 1 },
+          { ...boards[1], boardNumber: index * 2 + 2 },
+        ];
+      } else {
+        match.boards = undefined;
+      }
+    });
   }
 
   function clearError() {

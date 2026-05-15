@@ -1,6 +1,6 @@
 import Dexie from 'dexie';
 import type { Table } from 'dexie';
-import type { Tournament, Player, Round, Match, MatchResult } from '../domain/types';
+import type { Tournament, Round, MatchResult } from '../domain/types';
 
 interface TournamentRecord {
   id: string;
@@ -35,6 +35,7 @@ interface MatchRecord {
   roundId: string;
   teamA: string; // JSON
   teamB: string; // JSON
+  boards?: string; // JSON
   result?: string; // JSON
 }
 
@@ -46,7 +47,7 @@ class TournamentDatabase extends Dexie {
 
   constructor() {
     super('BughouseTournamentDB');
-    this.version(4).stores({
+    this.version(5).stores({
       tournaments: 'id',
       players: 'id, tournamentId',
       rounds: 'id, tournamentId',
@@ -102,6 +103,7 @@ export async function saveTournament(t: Tournament): Promise<void> {
           roundId: round.id,
           teamA: JSON.stringify(m.teamA),
           teamB: JSON.stringify(m.teamB),
+          boards: m.boards ? JSON.stringify(m.boards) : undefined,
           result: m.result ? JSON.stringify(m.result) : undefined,
         }))
       );
@@ -130,6 +132,7 @@ export async function loadTournament(tournamentId: string): Promise<Tournament |
         id: m.id,
         teamA: JSON.parse(m.teamA),
         teamB: JSON.parse(m.teamB),
+        boards: m.boards ? JSON.parse(m.boards) : undefined,
         result: m.result ? (JSON.parse(m.result) as MatchResult) : undefined,
       })),
     });

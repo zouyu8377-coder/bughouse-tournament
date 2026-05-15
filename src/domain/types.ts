@@ -24,13 +24,20 @@ export interface TeamMember {
 
 export interface Team {
   id: string;
-  members: [TeamMember, TeamMember]; // 恰好2人
+  members: TeamMember[]; // 自动配对时恰好2人，手动配对草稿可为空
+}
+
+export interface Board {
+  boardNumber: number;
+  whitePlayerId: PlayerId;
+  blackPlayerId: PlayerId;
 }
 
 export interface Match {
   id: MatchId;
   teamA: Team;
   teamB: Team;
+  boards?: [Board, Board]; // 两张棋盘的真实对位
   result?: MatchResult; // undefined = 未录入
 }
 

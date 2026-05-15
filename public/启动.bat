@@ -1,10 +1,5 @@
 @echo off
-set "APP_DIR=%~dp0dist"
-if not exist "%APP_DIR%\index.html" (
-  echo dist build not found. Please run: npx vite build
-  pause
-  exit /b 1
-)
+set "APP_DIR=%~dp0"
 echo Starting Bughouse tournament app...
 echo Opening http://localhost:8080 ...
 start http://localhost:8080
