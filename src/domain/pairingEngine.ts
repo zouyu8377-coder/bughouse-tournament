@@ -21,6 +21,8 @@ const TEAM_SEED_DIFF_WEIGHT = 20;
 const PERSONAL_SCORE_SPREAD_WEIGHT = 80;
 const HIGH_LOW_TEAMMATE_WEIGHT = 10;
 const COLOR_REPEAT_WEIGHT = 5;
+const DIRECT_OPPONENT_SCORE_WEIGHT = 0.01;
+const DIRECT_OPPONENT_SEED_WEIGHT = 0.001;
 const RANDOM_NOISE_WEIGHT = 0.01;
 const EXACT_SEARCH_PLAYER_LIMIT = 16;
 const CANDIDATE_LIMIT = 80;
@@ -122,12 +124,14 @@ function matchCost(
   const seedDiff = Math.abs(statsA.seedSum - statsB.seedSum);
   const scoreSpread = Math.max(...statsA.scores, ...statsB.scores) - Math.min(...statsA.scores, ...statsB.scores);
   const repeatedOpponents = countRepeatedOpponents(teamA, teamB, history);
+  const directOpponentBalance = directOpponentBalanceCost(teamA, teamB, playersMap);
 
   return (
     scoreDiff * TEAM_SCORE_DIFF_WEIGHT +
     seedDiff * TEAM_SEED_DIFF_WEIGHT +
     scoreSpread * PERSONAL_SCORE_SPREAD_WEIGHT +
-    repeatedOpponents * REPEAT_OPPONENT_WEIGHT
+    repeatedOpponents * REPEAT_OPPONENT_WEIGHT +
+    directOpponentBalance
   );
 }
 
@@ -149,6 +153,24 @@ function countRepeatedOpponents(teamA: Team, teamB: Team, history: HistoryMap): 
   return getBoardsForTeams(teamA, teamB).filter((board) =>
     history.get(board.whitePlayerId)?.opponents.has(board.blackPlayerId)
   ).length;
+}
+
+function directOpponentBalanceCost(
+  teamA: Team,
+  teamB: Team,
+  playersMap: Map<PlayerId, Player>
+): number {
+  return getBoardsForTeams(teamA, teamB).reduce((cost, board) => {
+    const white = playersMap.get(board.whitePlayerId);
+    const black = playersMap.get(board.blackPlayerId);
+    if (!white || !black) return cost;
+
+    return (
+      cost +
+      Math.abs(white.score - black.score) * DIRECT_OPPONENT_SCORE_WEIGHT +
+      Math.abs(white.seed - black.seed) * DIRECT_OPPONENT_SEED_WEIGHT
+    );
+  }, 0);
 }
 
 export function getBoardsForTeams(teamA: Team, teamB: Team): [Board, Board] {

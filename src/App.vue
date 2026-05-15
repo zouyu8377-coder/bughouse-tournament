@@ -8,6 +8,7 @@ import Scoreboard from './components/Scoreboard.vue';
 
 const store = useTournamentStore();
 const activeTab = ref<'setup' | 'players' | 'pairing' | 'scores'>('setup');
+const appVersion = __APP_VERSION__;
 
 const hasTournament = computed(() => !!store.tournament);
 const tabs = computed(() => {
@@ -28,7 +29,10 @@ const tabs = computed(() => {
 <template>
   <div class="app">
     <header class="header">
-      <h1>Bughouse 比赛编排系统</h1>
+      <div class="title-row">
+        <h1>Bughouse 比赛编排系统</h1>
+        <span class="version-badge">v{{ appVersion }}</span>
+      </div>
       <nav class="tabs">
         <button
           v-for="tab in tabs"
@@ -86,8 +90,21 @@ body {
 }
 
 .header h1 {
-  margin: 0 0 12px;
+  margin: 0;
   font-size: 22px;
+}
+
+.title-row {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.version-badge {
+  color: #636e72;
+  font-size: 12px;
+  font-weight: 600;
 }
 
 .tabs {
