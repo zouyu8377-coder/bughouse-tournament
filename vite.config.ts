@@ -1,7 +1,7 @@
-import { defineConfig } from 'vite'
-import vue from '@vitejs/plugin-vue'
-import { VitePWA } from 'vite-plugin-pwa'
-import pkg from './package.json'
+import { defineConfig } from 'vite';
+import vue from '@vitejs/plugin-vue';
+import { VitePWA } from 'vite-plugin-pwa';
+import pkg from './package.json';
 
 export default defineConfig({
   base: './',
@@ -17,11 +17,12 @@ export default defineConfig({
         globPatterns: ['**/*.{js,css,html,ico,png,svg}'],
       },
       manifest: {
-        name: 'Bughouse 比赛编排系统',
-        short_name: 'Bughouse',
-        description: 'Bughouse 瑞士制比赛编排系统',
-        theme_color: '#0984e3',
-        background_color: '#f5f6fa',
+        name: 'Bughouse Tournament Mobile MVP',
+        short_name: 'Bughouse MVP',
+        description:
+          'A mobile-first tournament management MVP for pairing, scoring, standings, and results.',
+        theme_color: '#1268b3',
+        background_color: '#eef2f5',
         display: 'standalone',
         start_url: './index.html',
         scope: './',
@@ -36,4 +37,4 @@ export default defineConfig({
       },
     }),
   ],
-})
+});

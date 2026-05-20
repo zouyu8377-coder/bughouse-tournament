@@ -68,12 +68,17 @@ export const useTournamentStore = defineStore('tournament', () => {
     return new Set(tournament.value?.players.map((p) => p.id) ?? []);
   });
 
+  const tournamentStarted = computed(() => {
+    return (tournament.value?.rounds.length ?? 0) > 0;
+  });
+
   // ==================== Actions ====================
 
   async function createTournament(
     name: string,
     playersInput: { name: string; seed: number }[],
-    totalRounds: number
+    totalRounds: number,
+    pairingStrategy: PairingStrategy = 'semiAuto'
   ) {
     const id = uid('tour-');
     const players: Player[] = playersInput.map((p) => ({
@@ -94,6 +99,7 @@ export const useTournamentStore = defineStore('tournament', () => {
       rounds: [],
       currentRound: 0,
       totalRounds,
+      pairingStrategy,
     };
 
     await persist();
@@ -126,9 +132,70 @@ export const useTournamentStore = defineStore('tournament', () => {
     }
   }
 
+  function addPlayer(name: string) {
+    if (!tournament.value || tournamentStarted.value) return;
+    const playerName = name.trim();
+    if (!playerName) return;
+    if (tournament.value.players.length >= 64) {
+      error.value = 'Player limit is 64.';
+      return;
+    }
+
+    tournament.value.players.push({
+      id: uid('pl-'),
+      name: playerName,
+      rating: 0,
+      seed: tournament.value.players.length + 1,
+      score: 0,
+      buchholz: 0,
+      progressive: 0,
+      sonnebornBerger: 0,
+    });
+    persist();
+  }
+
+  function renamePlayer(playerId: PlayerId, name: string) {
+    if (!tournament.value) return;
+    const playerName = name.trim();
+    if (!playerName) return;
+    const player = tournament.value.players.find((p) => p.id === playerId);
+    if (!player) return;
+    player.name = playerName;
+    persist();
+  }
+
+  function removePlayer(playerId: PlayerId) {
+    if (!tournament.value || tournamentStarted.value) return;
+    tournament.value.players = tournament.value.players
+      .filter((p) => p.id !== playerId)
+      .sort((a, b) => a.seed - b.seed)
+      .map((p, index) => ({ ...p, seed: index + 1 }));
+    persist();
+  }
+
+  function movePlayerSeed(playerId: PlayerId, direction: 'up' | 'down') {
+    if (!tournament.value || tournamentStarted.value) return;
+    const players = [...tournament.value.players].sort((a, b) => a.seed - b.seed);
+    const index = players.findIndex((p) => p.id === playerId);
+    const targetIndex = direction === 'up' ? index - 1 : index + 1;
+    if (index < 0 || targetIndex < 0 || targetIndex >= players.length) return;
+
+    const currentSeed = players[index].seed;
+    players[index].seed = players[targetIndex].seed;
+    players[targetIndex].seed = currentSeed;
+    tournament.value.players = players.sort((a, b) => a.seed - b.seed);
+    persist();
+  }
+
+  function setPairingStrategy(strategy: PairingStrategy) {
+    if (!tournament.value || tournamentStarted.value) return;
+    tournament.value.pairingStrategy = strategy;
+    persist();
+  }
+
   // ---- 轮次管理 ----
 
-  function startNewRound(strategy: PairingStrategy = 'semiAuto') {
+  function startNewRound(strategy: PairingStrategy = tournament.value?.pairingStrategy ?? 'semiAuto') {
     if (!tournament.value) return;
     if (currentRoundObj.value && !currentRoundObj.value.locked) {
       error.value = '当前轮次未锁定，无法进入下一轮';
@@ -242,7 +309,8 @@ export const useTournamentStore = defineStore('tournament', () => {
     if (team.members.length >= 2) return; // 队伍已满
 
     // 自动分配颜色：第一个加入为 white，第二个为 black
-    const color = team.members.length === 0 ? 'white' : 'black';
+    const usedColors = new Set(team.members.map((member) => member.color));
+    const color = usedColors.has('white') ? 'black' : 'white';
     team.members.push({ playerId, color });
 
     rebuildCurrentRoundBoards();
@@ -280,7 +348,7 @@ export const useTournamentStore = defineStore('tournament', () => {
     persist();
   }
 
-  function regenerateCurrentRound(strategy: PairingStrategy = 'semiAuto') {
+  function regenerateCurrentRound(strategy: PairingStrategy = tournament.value?.pairingStrategy ?? 'semiAuto') {
     if (!tournament.value || !currentRoundObj.value) return;
     if (currentRoundObj.value.locked) {
       error.value = '当前轮次已锁定，无法重新生成';
@@ -333,6 +401,7 @@ export const useTournamentStore = defineStore('tournament', () => {
     warnings,
     currentRoundObj,
     currentRoundLocked,
+    tournamentStarted,
     playersWithScores,
     sortedPlayers,
     historyMap,
@@ -340,6 +409,11 @@ export const useTournamentStore = defineStore('tournament', () => {
     load,
     removeTournament,
     persist,
+    addPlayer,
+    renamePlayer,
+    removePlayer,
+    movePlayerSeed,
+    setPairingStrategy,
     startNewRound,
     lockCurrentRound,
     unlockCurrentRound,

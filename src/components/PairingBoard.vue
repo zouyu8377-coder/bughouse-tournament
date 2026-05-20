@@ -31,7 +31,6 @@ function lockRound() {
 }
 
 // ==================== 拖拽相关 ====================
-const playerListRef = ref<HTMLElement | null>(null);
 const matchRefs = ref<Map<string, HTMLElement>>(new Map());
 
 function setMatchRef(el: HTMLElement | null, matchId: string) {
@@ -163,7 +162,7 @@ const warnings = computed(() => store.warnings);
       <!-- 未分配选手池 -->
       <div class="player-pool">
         <h3>未分配选手（{{ unassignedPlayers.length }}）</h3>
-        <div class="player-list" ref="playerListRef">
+        <div class="player-list">
           <div
             v-for="p in unassignedPlayers"
             :key="p.id"
@@ -209,7 +208,7 @@ const warnings = computed(() => store.warnings);
             </div>
             <div class="team-members">
               <div
-                v-for="(m, idx) in match.teamA.members"
+                v-for="m in match.teamA.members"
                 :key="m.playerId"
                 class="member"
               >
@@ -269,7 +268,7 @@ const warnings = computed(() => store.warnings);
             </div>
             <div class="team-members">
               <div
-                v-for="(m, idx) in match.teamB.members"
+                v-for="m in match.teamB.members"
                 :key="m.playerId"
                 class="member"
               >

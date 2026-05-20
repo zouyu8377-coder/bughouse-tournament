@@ -1,12 +1,13 @@
 import Dexie from 'dexie';
 import type { Table } from 'dexie';
-import type { Tournament, Round, MatchResult } from '../domain/types';
+import type { Tournament, Round, MatchResult, PairingStrategy } from '../domain/types';
 
 interface TournamentRecord {
   id: string;
   name: string;
   currentRound: number;
   totalRounds: number;
+  pairingStrategy?: PairingStrategy;
   createdAt: number;
 }
 
@@ -67,6 +68,7 @@ export async function saveTournament(t: Tournament): Promise<void> {
       name: t.name,
       currentRound: t.currentRound,
       totalRounds: t.totalRounds,
+      pairingStrategy: t.pairingStrategy,
       createdAt: Date.now(),
     });
 
@@ -143,6 +145,7 @@ export async function loadTournament(tournamentId: string): Promise<Tournament |
     name: tRec.name,
     currentRound: tRec.currentRound,
     totalRounds: tRec.totalRounds ?? 0,
+    pairingStrategy: tRec.pairingStrategy ?? 'semiAuto',
     players: playerRecs.map((p) => ({
       id: p.id,
       name: p.name,

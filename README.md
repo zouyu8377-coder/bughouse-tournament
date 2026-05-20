@@ -1,93 +1,169 @@
-# Bughouse 比赛编排系统
+# Bughouse Tournament Mobile MVP
 
-面向线下 Bughouse 联棋比赛的单机编排工具，支持选手录入、瑞士制风格自动配对、手动微调、结果录入、积分榜和破同分排名。
+A mobile-first tournament management MVP for complex pairing, scoring, standings, and result workflows.
 
-## 预览
+This is not just a UI redesign. It is a mobile-first transformation of a rule-based tournament workflow: player intake, automated pairing, touch-friendly result entry, live standings, tie-break calculation, and final podium presentation.
 
-### 比赛设置
+## Screenshots
 
-![比赛设置](比赛设置.png)
+| Dashboard | Pairings + Results | Final Podium |
+| --- | --- | --- |
+| ![Mobile dashboard](docs/screenshots/mobile-dashboard.png) | ![Mobile pairings and result entry](docs/screenshots/mobile-pairings-results.png) | ![Mobile final podium](docs/screenshots/mobile-final-podium.png) |
 
-### 对阵编排
+## Project Background
 
-![对阵编排](对阵编排.png)
+Bughouse is a two-player-team chess variant where tournament organization is more complex than a simple singles bracket. Players enter as individuals, but every round forms new teams, assigns colors, records team results, and converts those results back into individual standings.
 
-### 积分榜
+The goal of this project is to demonstrate how a niche offline tournament process can become a practical mobile-first organizer tool. The workflow is highly transferable to snooker leagues, chess events, pool leagues, darts leagues, and local club competitions.
 
-![积分榜](积分榜.png)
+## Problem
 
-## 功能
+Local tournament organizers often need to run events from a phone while standing beside players. A desktop-style table interface is hard to use in that setting.
 
-- 创建和加载本地比赛
-- 录入选手并按种子顺序排序
-- 自动生成 Bughouse 对阵，兼顾队友轮换、高低搭配、积分接近和颜色平衡
-- 支持人工调整对阵
-- 录入胜、负、和结果
-- 自动计算积分、对手分、累进分和索博分
+The organizer needs to:
 
-比赛编排采用适配 Bughouse 联棋的瑞士制编排。选手以个人身份参赛，每轮系统会重新组成双人队伍并安排对阵。
+- Add players quickly.
+- Generate pairings.
+- Review the current round.
+- Enter results from match cards.
+- See live standings.
+- Confirm final rankings and podium results.
 
-每轮配对会综合考虑以下因素：
+The hard part is not only layout. The hard part is preserving rule logic while making the workflow state-driven and touch-friendly.
 
-尽量避免重复队友。重复队友会被极力避免，但在人数较少或轮次较多时，系统可能被迫安排重复队友。
-尽量高低搭配。种子号较高与较低的选手会优先组成队伍，使每队实力更均衡。
-尽量让两队总实力接近。系统会比较两队种子号组合，优先安排实力接近的队伍对阵。
-尽量让积分接近的队伍相遇。系统优先考虑两队当前总积分接近，同时也会参考队内个人积分差。
-尽量避免连续执同色。系统会参考上一轮执白/执黑情况，尽量轮换颜色。
-尽量减少重复遇到同一位对手。此项为低优先级，不会优先于队友轮换、实力平衡和积分接近。
-在多个方案接近时，系统会使用可复现的轻微打散规则，避免固定模式。
-每轮比赛结果按队伍记录，并计入两名队员的个人积分：
+## Solution
 
-胜：1 分
-平：0.5 分
-负：0 分
-个人排名依次按照以下规则决定：
+This MVP keeps the existing Vue web stack and local-first storage, then adds a mobile app shell and mobile-specific screens under `src/mobile/`.
 
-总积分
-对手分 Buchholz
-累进分 Progressive
-索博分 Sonneborn-Berger
-种子号
-对手分、累进分和索博分用于区分同分选手。比赛结束后，以最终个人排名确定名次。
+The app now guides a single organizer through:
 
-English
+1. Dashboard status and next action.
+2. Player roster management.
+3. Round generation.
+4. Pairing cards.
+5. Result entry inside each pairing card.
+6. Live standings with tie-breaks.
+7. Final podium when the tournament is complete.
 
-This event uses a Swiss-style pairing system adapted for Bughouse. Players enter as individuals. In each round, the system forms new two-player teams and pairs those teams against each other.
+## Mobile MVP Scope
 
-Pairings are based on the following priorities:
+Included:
 
-Avoid repeated teammates as much as possible. Repeated teammates are strongly discouraged, but may occur if the player pool or number of rounds makes it unavoidable.
-Prefer mixed-strength teams. Higher-seeded and lower-seeded players are more likely to be paired together to keep teams balanced.
-Keep team strength close. The system compares the combined seed strength of both teams and prefers balanced matchups.
-Keep scores close. Teams with similar total scores are preferred, with individual score spread used as a secondary factor.
-Avoid repeated colors when possible. The system considers each player’s previous color and tries to alternate white/black assignments.
-Reduce repeated individual opponents. This is a low-priority factor and does not override teammate rotation, team balance, or score proximity.
-When multiple options are very close, a small reproducible tie-break is used to avoid fixed pairing patterns.
-Each round result is recorded by team and applied to both players on that team:
+- Mobile-first dashboard.
+- Bottom navigation.
+- Player cards with seed, score, edit, delete, and reseed controls.
+- Pairing cards for each match.
+- Touch-friendly result buttons.
+- Round completion and confirmation states.
+- Standings cards with Buchholz, Progressive, and Sonneborn-Berger.
+- Final podium display.
+- PWA-ready metadata through Vite PWA.
+- Local IndexedDB persistence.
 
-Win: 1 point
-Draw: 0.5 points
-Loss: 0 points
-Individual standings are ranked by:
+Intentionally not included:
 
-Total score
-Buchholz
-Progressive score
-Sonneborn-Berger
-Seed number
-Buchholz, Progressive score, and Sonneborn-Berger are used as tie-breaks between players with the same total score. Final individual standings determine the event results.
+- Login or user accounts.
+- Online matchmaking.
+- Cloud sync.
+- Push notifications.
+- Payments.
+- Native mobile app packaging.
+- Multi-role permissions.
+- Backend API.
 
-## 本地运行
+## Core Organizer Flow
+
+The MVP is designed around a single role: Tournament Organizer.
+
+```text
+Setup
+-> Add/manage players
+-> Generate round
+-> Review pairings
+-> Enter results
+-> Confirm round
+-> View standings
+-> Complete tournament
+-> View final podium
+```
+
+The dashboard derives the next primary action from tournament state instead of showing every possible button at once.
+
+## Core Logic
+
+The pairing and scoring logic is preserved from the original project.
+
+Core files:
+
+- `src/domain/pairingEngine.ts` - pairing generation, history tracking, scoring, validation, tie-break calculations.
+- `src/domain/types.ts` - Tournament, Player, Round, Match, Team, Board, and result types.
+- `src/stores/tournament.ts` - Pinia store for tournament state and actions.
+- `src/db/database.ts` - Dexie/IndexedDB local persistence.
+
+Pairing priorities include:
+
+- Avoid repeated teammates where possible.
+- Prefer balanced high/low seed team composition.
+- Keep team scores and seed strength close.
+- Reduce repeated individual opponents.
+- Consider color history.
+- Apply deterministic tie-break noise when options are close.
+
+Standings are ranked by:
+
+1. Total score.
+2. Buchholz.
+3. Progressive score.
+4. Sonneborn-Berger.
+5. Seed number.
+
+## Architecture Notes
+
+The mobile transformation is intentionally incremental.
+
+- Existing business logic remains in `src/domain/`.
+- Existing persistence remains local through Dexie.
+- New mobile-first UI lives in `src/mobile/`.
+- Legacy desktop-oriented components are kept in `src/components/` as reference while the MVP is migrated.
+- No backend or authentication layer is introduced.
+
+## Tech Stack
+
+- Vue 3
+- TypeScript
+- Pinia
+- Dexie / IndexedDB
+- Vite
+- vite-plugin-pwa
+- Electron packaging config retained from the original project
+
+## Run Locally
 
 ```powershell
 npm install
 npm run dev
 ```
 
-## 浏览器版构建
+## Build
 
 ```powershell
-npx vite build
+npm run build
 ```
 
-构建产物位于 `dist/`，可部署到任意静态网站服务。
+The production build is generated in `dist/`.
+
+## Transferability To League Matchmaking Apps
+
+This project maps closely to mobile MVPs for snooker leagues, pool leagues, darts leagues, chess clubs, and other local competition tools.
+
+The transferable product patterns are:
+
+- Player ranking or seeding.
+- Matchmaking/pairing rules.
+- Result entry.
+- Result confirmation.
+- Season or tournament standings.
+- Promotion/final ranking logic.
+- Organizer-first mobile workflow.
+
+That makes this project a useful portfolio case for complex-rule MVP delivery, not just visual frontend work.

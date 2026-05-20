@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue';
 import { useTournamentStore } from '../stores/tournament';
+import type { PairingStrategy } from '../domain/types';
 import AlertModal from './AlertModal.vue';
 
 const emit = defineEmits<{ (e: 'created'): void }>();
@@ -8,6 +9,7 @@ const store = useTournamentStore();
 
 const name = ref('');
 const totalRounds = ref(5);
+const pairingStrategy = ref<PairingStrategy>('semiAuto');
 const savedTournaments = ref<Awaited<ReturnType<typeof store.listTournaments>>>([]);
 
 const alertVisible = ref(false);
@@ -88,7 +90,12 @@ async function create() {
     showAlert('选手人数不能超过 64 人');
     return;
   }
-  await store.createTournament(nameTrimmed, validPlayers.value, totalRounds.value);
+  await store.createTournament(
+    nameTrimmed,
+    validPlayers.value,
+    totalRounds.value,
+    pairingStrategy.value
+  );
   emit('created');
 }
 
@@ -114,6 +121,14 @@ async function remove(id: string) {
       <div class="field">
         <label>总轮次</label>
         <input v-model.number="totalRounds" type="number" min="1" max="20" />
+      </div>
+      <div class="field">
+        <label>Pairing strategy</label>
+        <select v-model="pairingStrategy">
+          <option value="semiAuto">Semi-auto</option>
+          <option value="auto">Auto</option>
+          <option value="manual">Manual</option>
+        </select>
       </div>
 
       <div class="field">
@@ -184,8 +199,8 @@ async function remove(id: string) {
 <style scoped>
 .setup {
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 24px;
+  grid-template-columns: 1fr;
+  gap: 16px;
 }
 
 .panel {
@@ -210,7 +225,8 @@ async function remove(id: string) {
   color: #636e72;
 }
 
-.field input {
+.field input,
+.field select {
   width: 100%;
   padding: 8px;
   border: 1px solid #b2bec3;
