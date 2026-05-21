@@ -137,6 +137,27 @@ The mobile transformation is intentionally incremental.
 - vite-plugin-pwa
 - Electron packaging config retained from the original project
 
+## Deployment / Online Demo
+
+This project is configured for automatic deployment to **GitHub Pages**.
+
+- **Live URL**: [https://zouyu8377-coder.github.io/bughouse-tournament/](https://zouyu8377-coder.github.io/bughouse-tournament/)
+- You can open the link directly on your phone — no local development server is required.
+- All tournament data is stored in the browser's local IndexedDB, so data on different devices is **not shared**.
+
+### How it works
+
+- Every push to the `master` branch triggers the [GitHub Actions workflow](.github/workflows/deploy.yml).
+- The workflow builds the project with Vite and deploys the `dist/` folder to GitHub Pages.
+- The Vite `base` path is set to `/bughouse-tournament/` in production so all assets load correctly under the repository's subpath.
+
+### Enable GitHub Pages
+
+1. Go to your repository on GitHub.
+2. Navigate to **Settings → Pages**.
+3. Under **Build and deployment**, set **Source** to **GitHub Actions**.
+4. Push to `master` (or trigger the workflow manually) and the site will be live shortly.
+
 ## Run Locally
 
 ```powershell
